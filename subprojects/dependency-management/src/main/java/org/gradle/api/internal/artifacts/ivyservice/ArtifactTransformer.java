@@ -30,6 +30,7 @@ import org.gradle.api.internal.DefaultAttributeContainer;
 import org.gradle.api.internal.artifacts.DefaultResolvedArtifact;
 import org.gradle.api.internal.artifacts.configurations.ResolutionStrategyInternal;
 import org.gradle.api.internal.artifacts.ivyservice.resolveengine.artifact.ArtifactVisitor;
+import org.gradle.internal.Cast;
 import org.gradle.internal.Factory;
 import org.gradle.internal.component.model.DefaultIvyArtifactName;
 
@@ -40,31 +41,32 @@ import java.util.List;
 import java.util.Map;
 
 public class ArtifactTransformer {
-    private final String format;
+    private final AttributeContainer requiredAttributes;
     private final ResolutionStrategyInternal resolutionStrategy;
     private final Map<File, File> transformed = new HashMap<File, File>();
 
-    public ArtifactTransformer(@Nullable String format, ResolutionStrategyInternal resolutionStrategy) {
-        this.format = format;
+    public ArtifactTransformer(@Nullable AttributeContainer requiredAttributes, ResolutionStrategyInternal resolutionStrategy) {
+        this.requiredAttributes = requiredAttributes;
         this.resolutionStrategy = resolutionStrategy;
     }
 
     public ArtifactVisitor visitor(final ArtifactVisitor visitor) {
-        if (format == null) {
+        if (requiredAttributes == null || requiredAttributes.isEmpty()) {
             return visitor;
         }
         return new ArtifactVisitor() {
             @Override
             public void visitArtifact(final ResolvedArtifact artifact) {
-                if (artifact.getType().equals(format)) {
+                if (resolutionStrategy.matchArtifactsAttributes(artifact.getAttributes())) {
                     visitor.visitArtifact(artifact);
                     return;
                 }
-                final Transformer<File, File> transform = resolutionStrategy.getTransform(artifact.getType(), format);
+                final Transformer<File, File> transform = resolutionStrategy.getTransform(artifact.getAttributes(), requiredAttributes);
                 if (transform == null) {
                     return;
                 }
-                visitor.visitArtifact(new DefaultResolvedArtifact(artifact.getModuleVersion(), new DefaultIvyArtifactName(artifact.getName(), format, artifact.getExtension()), artifact.getId(), new Factory<File>() {
+                AttributeContainer transformedAttributes = copyRequiredAttributes();
+                visitor.visitArtifact(new DefaultResolvedArtifact(artifact.getModuleVersion(), new DefaultIvyArtifactName(artifact.getName(), artifact.getType(), artifact.getExtension(), null, transformedAttributes), artifact.getId(), new Factory<File>() {
                     @Override
                     public File create() {
                         File file = artifact.getFile();
@@ -87,9 +89,8 @@ public class ArtifactTransformer {
             public void visitFiles(@Nullable ComponentIdentifier componentIdentifier, Iterable<File> files) {
                 List<File> result = new ArrayList<File>();
                 for (File file : files) {
-                    String fileFormat = Files.getFileExtension(file.getName());
-                    if (format.equals(fileFormat)) {
                     AttributeContainer attributeContainer = defaultFileAttributes(file);
+                    if (resolutionStrategy.matchArtifactsAttributes(defaultFileAttributes(file))) {
                         result.add(file);
                         continue;
                     }
@@ -98,7 +99,7 @@ public class ArtifactTransformer {
                         result.add(transformedFile);
                         continue;
                     }
-                    Transformer<File, File> transform = resolutionStrategy.getTransform(fileFormat, format);
+                    Transformer<File, File> transform = resolutionStrategy.getTransform(attributeContainer, requiredAttributes);
                     if (transform == null) {
                         continue;
                     }
@@ -120,6 +121,15 @@ public class ArtifactTransformer {
                     attributes.attribute(Attribute.of(ArtifactExtension.class), new ArtifactExtension(fileExtension));
                 }
                 return attributes;
+            }
+
+            private AttributeContainer copyRequiredAttributes() {
+                AttributeContainer copy = new DefaultAttributeContainer();
+                for (Attribute<?> attribute : requiredAttributes.keySet()) {
+                    Attribute<Object> castAttribute = Cast.uncheckedCast(attribute);
+                    copy.attribute(castAttribute, requiredAttributes.getAttribute(castAttribute));
+                }
+                return copy;
             }
         };
     }

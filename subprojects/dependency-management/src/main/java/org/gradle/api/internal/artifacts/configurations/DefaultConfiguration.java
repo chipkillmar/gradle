@@ -272,17 +272,6 @@ public class DefaultConfiguration extends AbstractFileCollection implements Conf
         return this;
     }
 
-    @Override
-    public String getFormat() {
-        return format;
-    }
-
-    @Override
-    public Configuration setFormat(String format) {
-        this.format = format;
-        return this;
-    }
-
     public String getDescription() {
         return description;
     }
